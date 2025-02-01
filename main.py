@@ -2,7 +2,13 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from config import Config, logger
-from utils import deport_to_mexico, extract_slack_mentions, get_mentors
+from utils import (
+    deport_to_mexico,
+    extract_slack_mentions,
+    get_immigrants,
+    get_mentors,
+    migrate_from_mexico,
+)
 
 app = App(
     token=Config.SLACK_BOT_TOKEN, signing_secret=Config.SLACK_SIGNING_SECRET
@@ -24,12 +30,21 @@ def handle_deport(ack, body, client):
         trigger_id = body["trigger_id"]
         text = body.get("text", "").strip()
         mentors = get_mentors(client)
+        immigrants = get_immigrants(client)
 
         if user not in mentors:
             client.chat_postEphemeral(
                 channel=channel,
                 user=user,
                 text=(":confused: You are not a mentor, mind your business"),
+            )
+            return
+
+        if user not in immigrants:
+            client.chat_postEphemeral(
+                channel=channel,
+                user=user,
+                text=":thinking_face: You can't deport others when you haven't been to Mexico yourself!",
             )
             return
 
@@ -45,19 +60,19 @@ def handle_deport(ack, body, client):
             )
             return
 
-        # mentors_to_deport = [
-        #     user_id for user_id in users if user_id in mentors
-        # ]
-        # if mentors_to_deport:
-        #     client.chat_postEphemeral(
-        #         channel=channel,
-        #         user=user,
-        #         text=(
-        #             ":no_entry: You cannot deport the following mentors!\n\n"
-        #             + "\n".join([f"• <@{m}>" for m in mentors_to_deport])
-        #         ),
-        #     )
-        #     return
+        mentors_to_deport = [
+            user_id for user_id in users if user_id in mentors
+        ]
+        if mentors_to_deport:
+            client.chat_postEphemeral(
+                channel=channel,
+                user=user,
+                text=(
+                    ":no_entry: You cannot deport the following mentors!\n\n"
+                    + "\n".join([f"• <@{m}>" for m in mentors_to_deport])
+                ),
+            )
+            return
 
         client.views_open(
             trigger_id=trigger_id,
@@ -170,8 +185,17 @@ def accept_deportation(ack, body, client):
     try:
         ack()
         user = body["user"]["id"]
+        mentor = body["message"]["text"].split()[0].strip("<@>")
         message = body["message"]
         blocks = message["blocks"]
+
+        if mentor == user:
+            client.chat_postEphemeral(
+                channel=body["channel"]["id"],
+                user=user,
+                text=":no_entry: You cannot approve your own deportation request",
+            )
+            return
 
         blocks[0]["text"]["text"] += f"\n\n:sat: Approved by <@{user}>"
         blocks.pop()
@@ -182,14 +206,16 @@ def accept_deportation(ack, body, client):
             text="Deportation request approval",
         )
         users = extract_slack_mentions(blocks[0]["text"]["text"])["users"]
-        mentors = [body["message"]["text"].split()[0].strip("<@>"), user]
-        users = [user for user in users if user not in mentors]
+        print(users)
+        users = [u for u in users if u not in [mentor, user]]
+        print("after")
+        print(users)
 
         for deported_user in users:
             deport_to_mexico(client, deported_user)
             client.chat_postMessage(
                 channel=deported_user,
-                text=f"👮 You have been deported to <#{Config.MEXICO_CHANNEL}> by <@{mentors[0]}>.\nPlease review the workspace rules and follow proper conduct guidelines to be reinstated.",
+                text=f"👮 You have been deported to <#{Config.MEXICO_CHANNEL}> by <@{mentor}>.\nPlease review the workspace rules and follow proper conduct guidelines to be reinstated.",
             )
 
     except Exception as e:
@@ -199,6 +225,116 @@ def accept_deportation(ack, body, client):
             user=user,
             text="🔧 Oops! Something went wrong. Please try again.",
         )
+
+
+@app.command("/reinstate")
+def handle_reinstate(ack, body, client):
+    """Handle the /reinstate command."""
+    try:
+        ack()
+        user = body["user_id"]
+        channel = body["channel_id"]
+        text = body.get("text", "").strip()
+        mentors = get_mentors(client)
+        immigrants = get_immigrants(client)
+
+        if user not in mentors:
+            client.chat_postEphemeral(
+                channel=channel,
+                user=user,
+                text=":confused: You are not a mentor, mind your business",
+            )
+            return
+
+        if channel != Config.MEXICO_CHANNEL:
+            client.chat_postEphemeral(
+                channel=channel,
+                user=user,
+                text=f":no_entry: You can only reinstate <#{channel}> immigrants from <#{Config.MEXICO_CHANNEL}>",
+            )
+            return
+
+        users = extract_slack_mentions(text)["users"]
+        if not users:
+            client.chat_postEphemeral(
+                channel=channel,
+                user=user,
+                text="Please mention the user to reinstate",
+            )
+            return
+
+        mentors_to_reinstate = [
+            user_id for user_id in users if user_id in mentors
+        ]
+        if mentors_to_reinstate:
+            client.chat_postEphemeral(
+                channel=channel,
+                user=user,
+                text=(
+                    ":no_entry: You cannot reinstate the following mentors!\n\n"
+                    + "\n".join([f"• <@{m}>" for m in mentors_to_reinstate])
+                ),
+            )
+            return
+
+        non_immigrants = [user for user in users if user not in immigrants]
+        if non_immigrants:
+            client.chat_postEphemeral(
+                channel=channel,
+                user=user,
+                text=(
+                    ":no_entry: Cannot reinstate the following user(s) as they are not immigrants:\n"
+                    + "\n".join([f"• <@{u}>" for u in non_immigrants])
+                ),
+            )
+            return
+
+        client.views_open(
+            trigger_id=body["trigger_id"],
+            view={
+                "type": "modal",
+                "title": {"type": "plain_text", "text": "Confirm Reinstate"},
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"Are you sure you want to reinstate <@{users[0]}>?",
+                        },
+                    },
+                ],
+                "close": {"type": "plain_text", "text": "Cancel"},
+                "submit": {"type": "plain_text", "text": "Reinstate"},
+                "callback_id": "confirm_reinstate",
+            },
+        )
+    except Exception as e:
+        logger.error(f"Error handling reinstate: {str(e)}")
+        client.chat_postEphemeral(
+            channel=channel, user=user, text="🔧 Something went wrong"
+        )
+
+
+@app.view("confirm_reinstate")
+def confirm_reinstate(ack, body, client):
+    """Handle reinstate confirmation"""
+    try:
+        ack()
+        user = extract_slack_mentions(
+            body["view"]["blocks"][0]["text"]["text"]
+        )["users"][0]
+        channels = migrate_from_mexico(client, user)
+        client.chat_postMessage(
+            channel=user,
+            text=f"You have been reinstated to the following channels:\n{"\n".join([f"• <#{channel}>" for channel in channels])}",
+        )
+        client.chat_postEphemeral(
+            channel=Config.MEXICO_CHANNEL,
+            user=body["user"]["id"],
+            text=f"✅ Successfully reinstated <@{user}>",
+        )
+    except Exception as e:
+        logger.error(f"Error confirming reinstate: {str(e)}")
 
 
 def main():

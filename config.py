@@ -2,6 +2,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
+from spreadsheet import Sheet
 
 load_dotenv()
 
@@ -18,4 +19,9 @@ class Config:
     MEXICO_CHANNEL = "C08BCTQL03S"  # "C089GMMHKLL"
     MENTOR_CHANNEL = (
         "C08BD8BPTT6"  # "C08977V9SRJ" - Restore later to #mentor-random
+    )
+
+    SHEET = Sheet(
+        "1-noQONm8x7GKQLrFYP24QjhijZOmHfJulCmKWUfw-lo",
+        {"A": "intern", "B": "channels"},
     )
