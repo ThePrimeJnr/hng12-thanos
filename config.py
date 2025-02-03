@@ -16,10 +16,8 @@ class Config:
     SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
     SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
 
-    MEXICO_CHANNEL = "C08BCTQL03S"  # "C089GMMHKLL"
-    MENTOR_CHANNEL = (
-        "C08BD8BPTT6"  # "C08977V9SRJ" - Restore later to #mentor-random
-    )
+    MEXICO_CHANNEL = "C089GMMHKLL"
+    MENTOR_CHANNEL = "C08977V9SRJ"
 
     SHEET = Sheet(
         "1-noQONm8x7GKQLrFYP24QjhijZOmHfJulCmKWUfw-lo",
